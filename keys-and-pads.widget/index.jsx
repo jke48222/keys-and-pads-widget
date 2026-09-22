@@ -378,7 +378,7 @@ const Engine = (() => {
     if (ac) { if (ac.state === "suspended") ac.resume(); return ac; }
     const AC = window.AudioContext || window.webkitAudioContext;
     ac = new AC({ latencyHint: "interactive" });
-    master = ac.createGain(); master.gain.value = 0.85;
+    master = ac.createGain(); master.gain.value = (recall("keyspads") || {}).data && (recall("keyspads") || {}).data.vol != null ? (recall("keyspads") || {}).data.vol : 0.85;
     comp = ac.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 12; comp.ratio.value = 4;
     comp.attack.value = 0.003; comp.release.value = 0.12;
@@ -592,93 +592,123 @@ const Engine = (() => {
   const play = () => { ensure(); if (seq.playing) return; seq.playing = true; seq.step = 0; seq.next = ac.currentTime + 0.05; seq.timer = setInterval(schedule, 25); };
   const stop = () => { seq.playing = false; clearInterval(seq.timer); seq.timer = null; seq.onStep(-1); };
 
-  return { ensure, hit, noteOn, noteOff, allOff, DRUMS, seq, play, stop, get ctx() { return ac; } };
+  const setVolume = (v) => { if (master) master.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), ac.currentTime, 0.02); };
+  return { ensure, hit, noteOn, noteOff, allOff, DRUMS, seq, play, stop, setVolume, get ctx() { return ac; } };
 })();
 
 const DRUMS = Engine.DRUMS;
 const PAD_KEYS = "1234qwerasdfzxcv";
 const NOTE_KEYS = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12, o: 13, l: 14, p: 15, ";": 16, "'": 17 };
 const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-const BLACK = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 }; // semitone -> white keys below it in the octave
+const BLACK = { 1: 1, 3: 2, 6: 4, 8: 5, 10: 6 };
 const DEFAULT_PATTERN = (() => { const p = new Array(16).fill(0); p[12] = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 12) | (1 << 14); p[13] = (1 << 4) | (1 << 12); p[8] = 0x5555; p[10] = (1 << 2) | (1 << 6) | (1 << 10) | (1 << 14); return p; })();
-const PRESETS = [["grand", "Grand"], ["ep", "EP"], ["bell", "Bell"]];
-const FAM_TINT = { kick: T.tintOrange, snr: T.tintPink, cym: T.tintBlue, tom: T.tintGreen, perc: T.tintPurple };
+const PRESETS = [["grand", "GRAND"], ["ep", "EP"], ["bell", "BELL"]];
+const QUAD = ["#E5452B", "#F08A24", "#F3C63C", "#F2EFE6"]; // TR-808 step-key colours, four per group
+const FONTS = "keys-and-pads.widget/fonts";
 
-const W = 560, H = 436;
+const W = 520, H = 640;
 
-export const refreshFrequency = false;
-
+// The body borrows the language of a small hardware sampler: a light grey slab
+// with a charcoal display band, black keys with white legends, printed labels,
+// one orange accent, and the 808's four-colour step row underneath.
 export const className = card("light", W, H, ...POS) + `
-  padding: 16px 18px 12px;
-  display: flex; flex-direction: column; gap: 10px;
-  user-select: none; -webkit-user-select: none;
-  --pad: 56px; --gap: 8px;
+  @font-face { font-family: "Doto"; src: url("${FONTS}/Doto-400-900.woff2") format("woff2"); font-weight: 400 900; }
+  @font-face { font-family: "Barlow Condensed"; src: url("${FONTS}/BarlowCondensed-600.woff2") format("woff2"); font-weight: 600; }
+  @font-face { font-family: "Barlow Condensed"; src: url("${FONTS}/BarlowCondensed-700.woff2") format("woff2"); font-weight: 700; }
+  --body: #E6E4DE; --body2: #D8D5CD; --ink: #1D1D1B; --print: #4A4945; --orange: #F5561E; --key: #2A2A2A; --key2: #3A3A3A;
+  --lbl: "Barlow Condensed", "Arial Narrow", sans-serif; --dot: "Doto", "Menlo", monospace;
+  background: linear-gradient(180deg, #ECEAE4 0%, var(--body) 30%, var(--body2) 100%);
+  backdrop-filter: none; border-radius: 22px; padding: 0; overflow: hidden;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.45), 0 2px 0 rgba(255,255,255,0.6) inset, 0 0 0 1px #B9B6AE;
+  color: var(--ink); font-family: var(--lbl); user-select: none; -webkit-user-select: none;
+  &::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:0.35; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.16'/%3E%3C/svg%3E"); }
+  .ws-drag { color: #777; background: rgba(0,0,0,0.05); top: 10px; left: 10px; }
+  .ws-resize { color: #777; background: rgba(0,0,0,0.05); }
 
-  .top { display:flex; align-items:center; justify-content:space-between; height: 22px; }
-  .cap { ${caption(T.inkMute)} }
-  .mode { display:flex; gap:2px; background: rgba(0,0,0,0.06); border-radius: 8px; padding: 2px; }
-  .mode span { font-family:${mono}; font-size:9px; letter-spacing:1.2px; text-transform:uppercase; padding: 3px 9px; border-radius: 6px; color:${T.inkMute}; cursor:pointer; }
-  .mode span.on { background:#fff; color:${T.ink}; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+  /* display band */
+  .lcd { position:relative; margin: 0; height: 96px; background: linear-gradient(180deg, #2B2B2B 0%, #1B1B1B 100%);
+         box-shadow: inset 0 -1px 0 rgba(255,255,255,0.06), inset 0 8px 18px rgba(0,0,0,0.45); padding: 16px 22px 12px 22px; display:flex; flex-direction:column; justify-content:space-between; }
+  .lcd .brand { position:absolute; top: 10px; left: 22px; font: 700 9px/1 var(--lbl); letter-spacing: 2.4px; color: #8A8A86; text-transform: uppercase; }
+  .lcd .brand b { color: var(--orange); font-weight: 700; margin-left: 8px; }
+  .lcd .icons { position:absolute; top: 12px; right: 22px; display:flex; gap: 8px; }
+  .lcd .icons i { width: 12px; height: 12px; display:block; opacity: 0.22; background: #fff; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; transition: opacity .15s; }
+  .lcd .icons i.on { opacity: 0.95; }
+  .lcd .icons i.on.org { background: var(--orange); }
+  .lcd .main { display:flex; align-items:flex-end; justify-content:space-between; margin-top: 18px; }
+  .lcd .hit { font: 700 30px/1 var(--dot); color: #F3F3F1; letter-spacing: 1px; white-space:nowrap; overflow:hidden; text-overflow: ellipsis; max-width: 300px; text-shadow: 0 0 10px rgba(255,255,255,0.25); }
+  .lcd .hit small { font-size: 14px; color: #8D8D89; margin-left: 10px; letter-spacing: 0; }
+  .lcd .meta { font: 700 12px/1 var(--dot); color: #A8A8A3; text-align:right; letter-spacing: 1px; }
+  .lcd .meta b { color: #F3F3F1; font-weight: 700; }
+  .lcd .vu { position:absolute; right: 22px; bottom: 34px; display:flex; gap: 3px; }
+  .lcd .vu i { width: 5px; height: 5px; border-radius: 1px; background: rgba(255,255,255,0.10); display:block; }
+  .lcd .vu i.on { background: #F3F3F1; box-shadow: 0 0 6px rgba(255,255,255,0.6); }
+  .lcd .vu i.on.hot { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
 
-  .body { display:flex; gap: 14px; }
-  .pads { display:grid; grid-template-columns: repeat(4, var(--pad)); grid-auto-rows: var(--pad); gap: var(--gap); }
-  .pad { position:relative; border-radius: 13px; cursor:pointer; overflow:hidden;
-         background: linear-gradient(180deg, #FFFFFF 0%, #EEF0F5 100%);
-         box-shadow: 0 2px 0 rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
-         transition: transform .06s ease, box-shadow .06s ease, background .12s ease; }
-  .pad:active { transform: translateY(2px); box-shadow: 0 0 0 rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.07), inset 0 2px 4px rgba(0,0,0,0.08); }
-  .pad.sel { box-shadow: 0 2px 0 rgba(0,0,0,0.10), 0 0 0 1.5px var(--tint), inset 0 1px 0 rgba(255,255,255,0.9); }
-  .pad .led { position:absolute; top:8px; right:8px; width:6px; height:6px; border-radius:50%; background: var(--tint); opacity:0.45; transition: opacity .18s ease, box-shadow .18s ease; }
-  .pad.lit .led { opacity:1; box-shadow: 0 0 10px var(--tint), 0 0 2px var(--tint); }
-  .pad .name { position:absolute; left:8px; bottom:7px; font-family:${mono}; font-size:8px; letter-spacing:1px; text-transform:uppercase; color:${T.inkDim}; }
-  .pad .key { position:absolute; top:6px; left:8px; font-family:${mono}; font-size:9px; color:${T.inkMute}; opacity:0.7; }
-  .pad .ripple { position:absolute; left:50%; top:50%; width:10px; height:10px; margin:-5px 0 0 -5px; border-radius:50%;
-                 background: var(--tint); opacity:0.5; animation: kp-ripple .42s ease-out forwards; pointer-events:none; }
-  @keyframes kp-ripple { from { transform: scale(0.6); opacity:0.55; } to { transform: scale(9); opacity:0; } }
+  /* panel */
+  .panel { padding: 14px 20px 14px; display:grid; grid-template-columns: 64px 1fr 84px; gap: 14px; }
+  .print { font: 600 8px/1 var(--lbl); letter-spacing: 1.4px; text-transform: uppercase; color: var(--print); white-space:nowrap; }
+  .col { display:flex; flex-direction:column; align-items:center; gap: 8px; }
+  .knob { position:relative; width: 44px; height: 44px; border-radius: 50%; cursor: ns-resize;
+          background: radial-gradient(circle at 40% 35%, #FFFFFF 0%, #E9E7E1 55%, #C9C6BE 100%);
+          box-shadow: 0 4px 6px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.9) inset, 0 0 0 1px rgba(0,0,0,0.12); }
+  .knob.orange { background: radial-gradient(circle at 40% 35%, #FF8A5C 0%, var(--orange) 55%, #C93F12 100%); }
+  .knob .ind { position:absolute; inset:0; border-radius:50%; }
+  .knob .ind::after { content:""; position:absolute; left: 50%; top: 5px; width: 3px; height: 12px; margin-left: -1.5px; border-radius: 2px; background: var(--ink); }
+  .knob.orange .ind::after { background: #fff; }
+  .btn { width: 44px; height: 30px; border-radius: 7px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+         font: 600 9px/1 var(--lbl); letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink);
+         background: linear-gradient(180deg, #F6F5F1 0%, #DEDBD3 100%); box-shadow: 0 2px 0 #B9B6AE, 0 3px 4px rgba(0,0,0,0.18), inset 0 1px 0 #fff; transition: transform .05s, box-shadow .05s; }
+  .btn:active, .btn.down { transform: translateY(2px); box-shadow: 0 0 0 #B9B6AE, 0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 #fff; }
+  .btn.dark { background: linear-gradient(180deg, #3A3A3A 0%, #222 100%); color: #F3F3F1; box-shadow: 0 2px 0 #0d0d0d, 0 3px 4px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.12); }
+  .btn.orange { background: linear-gradient(180deg, #FF7A45 0%, var(--orange) 100%); color: #fff; box-shadow: 0 2px 0 #B23B10, 0 3px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.35); }
+  .btn.wide { width: 84px; }
+  .led { width: 6px; height: 6px; border-radius: 50%; background: #B7B4AC; box-shadow: inset 0 1px 1px rgba(0,0,0,0.25); }
+  .led.on { background: var(--orange); box-shadow: 0 0 6px var(--orange), 0 0 1px var(--orange); }
+  .with-led { display:flex; align-items:center; gap: 6px; }
 
-  .side { flex:1; display:flex; flex-direction:column; gap: 10px; min-width: 0; }
-  .lcd { flex:1; border-radius: 14px; background: ${T.cardDark}; color:${T.onDark}; padding: 12px 14px 10px;
-         display:flex; flex-direction:column; justify-content:space-between; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 0 0 1px rgba(0,0,0,0.25); }
-  .lcd .row { display:flex; justify-content:space-between; align-items:baseline; font-family:${mono}; font-size:9px; letter-spacing:1.4px; text-transform:uppercase; color:${T.onDarkMute}; }
-  .lcd .hit { font-family:${serif}; font-style:italic; font-size:26px; line-height:1; color:${T.onDark}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .lcd .hit small { font-family:${mono}; font-style:normal; font-size:10px; letter-spacing:1px; color:${T.onDarkDim}; margin-left:8px; }
-  .lcd .vu { display:flex; gap:3px; height:8px; align-items:flex-end; }
-  .lcd .vu i { flex:1; background: rgba(255,255,255,0.14); border-radius:2px; height:100%; transition: background .1s ease; }
-  .lcd .vu i.on { background: ${T.tintGreen}; }
-  .lcd .vu i.on.hot { background: ${T.tintOrange}; }
+  /* pads */
+  .pads { display:grid; grid-template-columns: repeat(4, 58px); justify-content: center; gap: 8px 10px; align-content: start; }
+  .pcell { display:flex; flex-direction:column; align-items:center; gap: 5px; }
+  .pad { position:relative; width: 58px; height: 58px; border-radius: 10px; cursor:pointer; overflow:hidden;
+         background: linear-gradient(180deg, var(--key2) 0%, var(--key) 60%, #1E1E1E 100%);
+         box-shadow: 0 3px 0 #0E0E0E, 0 5px 8px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14); transition: transform .05s, box-shadow .05s, background .1s; }
+  .pad:active, .pad.down { transform: translateY(3px); box-shadow: 0 0 0 #0E0E0E, 0 1px 3px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.14); }
+  .pad .k { position:absolute; top: 6px; left: 8px; font: 700 12px/1 var(--lbl); color: #F3F3F1; letter-spacing: 0.5px; }
+  .pad .sym { position:absolute; right: 8px; bottom: 6px; font: 600 8px/1 var(--lbl); color: #8C8C88; letter-spacing: 1px; text-transform: uppercase; }
+  .pad .glow { position:absolute; inset:0; background: radial-gradient(circle at 50% 60%, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 60%); opacity:0; }
+  .pad.lit .glow { animation: kp-glow .35s ease-out; }
+  @keyframes kp-glow { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+  .pcell .print { display:flex; align-items:center; gap: 5px; }
+  .pcell .print .led { width: 5px; height: 5px; }
 
-  .steps { display:grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
-  .step { height: 20px; border-radius: 5px; background: rgba(0,0,0,0.07); cursor:pointer; position:relative; transition: background .1s ease; }
-  .step:nth-child(4n+1) { background: rgba(0,0,0,0.11); }
-  .step.on { background: var(--tint); box-shadow: inset 0 -2px 0 rgba(0,0,0,0.12); }
-  .step.now::after { content:""; position:absolute; inset:-2px; border-radius:7px; border: 1.5px solid ${T.ink}; opacity:0.7; }
+  /* step row */
+  .steps { grid-column: 1 / -1; display:grid; grid-template-columns: repeat(16, 1fr); gap: 6px; padding: 6px 2px 0; }
+  .step { display:flex; flex-direction:column; align-items:center; gap: 5px; cursor:pointer; }
+  .step .sled { width: 5px; height: 5px; border-radius: 50%; background: #B7B4AC; box-shadow: inset 0 1px 1px rgba(0,0,0,0.25); }
+  .step.on .sled { background: #E5452B; box-shadow: 0 0 6px #E5452B; }
+  .step.now .sled { background: #fff; box-shadow: 0 0 8px #fff; }
+  .step .cap { width: 100%; height: 24px; border-radius: 5px; background: var(--q); box-shadow: 0 2px 0 rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.35); transition: transform .05s; }
+  .step:active .cap { transform: translateY(2px); box-shadow: 0 0 0 rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.35); }
+  .step .n { font: 600 7px/1 var(--lbl); color: var(--print); letter-spacing: 0.5px; }
 
-  .ctl { display:flex; align-items:center; gap: 8px; }
-  .btn { height:28px; min-width:28px; padding:0 10px; border-radius: 9px; background:#fff; box-shadow: 0 1px 0 rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06);
-         display:flex; align-items:center; justify-content:center; font-family:${mono}; font-size:10px; letter-spacing:0.8px; color:${T.ink}; cursor:pointer; }
-  .btn:active { transform: translateY(1px); box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
-  .btn.play { width:34px; padding:0; border-radius:50%; font-size:11px; }
-  .btn.play.on { background:${T.ink}; color:#fff; }
-  .bpm { font-family:${mono}; font-size:11px; color:${T.ink}; min-width: 62px; text-align:center; }
-  .bpm b { font-weight:500; }
-  .chips { display:flex; gap:4px; margin-left:auto; }
-  .chip { font-family:${mono}; font-size:9px; letter-spacing:1px; text-transform:uppercase; padding:5px 8px; border-radius:7px; color:${T.inkMute}; cursor:pointer; background: rgba(0,0,0,0.05); }
-  .chip.on { background:${T.ink}; color:#fff; }
-
-  .piano { position:relative; height: 92px; display:flex; border-radius: 10px; overflow:hidden;
-           box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 2px 0 rgba(0,0,0,0.08); background:#D9DCE3; }
-  .white { position:relative; flex:1; margin-right:1px; border-radius: 0 0 6px 6px; cursor:pointer;
-           background: linear-gradient(180deg, #FFFFFF 0%, #F3F4F8 92%, #E3E6EE 100%); box-shadow: inset 0 -3px 0 rgba(0,0,0,0.06); transition: background .05s ease; }
-  .white:last-child { margin-right:0; }
-  .white.on { background: linear-gradient(180deg, #DCE7FB 0%, #BCD0F6 100%); box-shadow: inset 0 -1px 0 rgba(0,0,0,0.08); }
-  .white .n { position:absolute; bottom:5px; left:0; right:0; text-align:center; font-family:${mono}; font-size:8px; color:${T.inkMute}; opacity:0.75; pointer-events:none; }
-  .white .n b { display:block; font-weight:500; color:${T.inkDim}; }
-  .black { position:absolute; top:0; height: 56px; width: 7%; margin-left: -3.5%; border-radius: 0 0 5px 5px; cursor:pointer; z-index:2;
-           background: linear-gradient(180deg, #3A3D46 0%, #23252B 100%); box-shadow: 0 3px 4px rgba(0,0,0,0.35), inset 0 -3px 0 rgba(255,255,255,0.05); }
-  .black.on { background: linear-gradient(180deg, ${T.tintBlue} 0%, #1E4FA8 100%); }
-
-  .foot { text-align:center; font-family:${mono}; font-size:8.5px; letter-spacing:0.3px; color:${T.inkMute}; opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* keys */
+  .kb { grid-column: 1 / -1; position:relative; height: 82px; margin-top: 2px; border-radius: 8px; padding: 3px; background: #B9B6AE; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 1px 0 #fff; display:flex; gap: 2px; }
+  .white { position:relative; flex:1; border-radius: 0 0 5px 5px; cursor:pointer; background: linear-gradient(180deg, #FBFAF7 0%, #EDEBE5 85%, #D9D6CE 100%); box-shadow: inset 0 -3px 0 rgba(0,0,0,0.08), 0 1px 0 rgba(0,0,0,0.2); transition: background .04s; }
+  .white.on { background: linear-gradient(180deg, #FFD9C9 0%, #FFB08C 100%); }
+  .white .n { position:absolute; bottom: 6px; left:0; right:0; text-align:center; font: 600 8px/1 var(--lbl); color: #9A978F; letter-spacing: 0.6px; pointer-events:none; }
+  .white .n b { display:block; color: var(--ink); font-size: 9px; margin-bottom: 2px; }
+  .black { position:absolute; top: 3px; height: 50px; width: 6.4%; margin-left: -3.2%; border-radius: 0 0 4px 4px; cursor:pointer; z-index:2;
+           background: linear-gradient(180deg, #3C3C3C 0%, #1E1E1E 100%); box-shadow: 0 3px 3px rgba(0,0,0,0.4), inset 0 -3px 0 rgba(255,255,255,0.06); }
+  .black.on { background: linear-gradient(180deg, #FF8A5C 0%, #D8471A 100%); }
+  .footer { grid-column: 1 / -1; display:flex; justify-content:space-between; padding-top: 2px; }
 `;
+
+const ICONS = {
+  play: "M2 1 L11 6.5 L2 12 Z", pads: "M1 1h4v4H1zM7 1h4v4H7zM1 7h4v4H1zM7 7h4v4H7z", keys: "M1 1h2v10H1zM4 1h2v6H4zM7 1h2v10H7zM10 1h2v6h-2z",
+  grand: "M2 10 C2 4 10 4 10 10 M2 10h8", ep: "M1 6 L4 2 L7 10 L10 6", bell: "M6 1 L9 8 H3 Z M4 9h4v2H4z",
+};
+const Icon = ({ id, on, org }) => <i className={`${on ? "on" : ""} ${org ? "org" : ""}`} style={{ WebkitMaskImage: `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='${ICONS[id]}' fill='white' stroke='white' stroke-width='1.4' stroke-linejoin='round' fill-opacity='${id === "ep" || id === "grand" ? 0 : 1}'/></svg>`)}")` }} />;
 
 function KeysPads() {
   const saved = React.useMemo(() => (recall(KEY) || {}).data || {}, []);
@@ -686,50 +716,38 @@ function KeysPads() {
   const [preset, setPreset] = React.useState(saved.preset || "grand");
   const [octave, setOctave] = React.useState(saved.octave == null ? 4 : saved.octave);
   const [bpm, setBpm] = React.useState(saved.bpm || 96);
+  const [vol, setVol] = React.useState(saved.vol == null ? 0.85 : saved.vol);
   const [pattern, setPattern] = React.useState(Array.isArray(saved.pattern) && saved.pattern.length === 16 ? saved.pattern : DEFAULT_PATTERN);
   const [sel, setSel] = React.useState(12);
   const [playing, setPlaying] = React.useState(false);
   const [step, setStep] = React.useState(-1);
   const [lit, setLit] = React.useState({});
   const [held, setHeld] = React.useState({});
-  const [last, setLast] = React.useState({ text: "Ready", sub: "click or type" });
+  const [last, setLast] = React.useState({ text: "READY", sub: "" });
   const [vu, setVu] = React.useState(0);
   const ref = React.useRef({ mode, octave, preset, playing, bpm });
   ref.current = { mode, octave, preset, playing, bpm };
 
-  React.useEffect(() => { remember(KEY, { mode, preset, octave, bpm, pattern }); }, [mode, preset, octave, bpm, pattern]);
+  React.useEffect(() => { remember(KEY, { mode, preset, octave, bpm, vol, pattern }); }, [mode, preset, octave, bpm, vol, pattern]);
   React.useEffect(() => { Engine.seq.pattern = pattern; }, [pattern]);
   React.useEffect(() => { Engine.seq.bpm = bpm; }, [bpm]);
+  React.useEffect(() => { Engine.setVolume(vol); }, [vol]);
   React.useEffect(() => {
-    Engine.seq.onStep = (s) => {
-      setStep(s);
-      if (s >= 0) { const on = DRUMS.map((d, i) => (pattern[i] & (1 << s)) ? i : -1).filter((i) => i >= 0); if (on.length) flash(on, 0.8); }
-    };
+    Engine.seq.onStep = (s) => { setStep(s); if (s >= 0) { const on = DRUMS.map((d, i) => (pattern[i] & (1 << s)) ? i : -1).filter((i) => i >= 0); if (on.length) flash(on, 0.8); } };
   }, [pattern]);
 
   const flash = (idxs, v) => {
     setLit((l) => { const n = { ...l }; idxs.forEach((i) => { n[i] = (n[i] || 0) + 1; }); return n; });
-    setVu(Math.max(1, Math.round(v * 8)));
-    setTimeout(() => setVu((x) => Math.max(0, x - 3)), 90);
-    setTimeout(() => setVu((x) => Math.max(0, x - 3)), 180);
+    setVu(Math.max(1, Math.round(v * 10))); setTimeout(() => setVu((x) => Math.max(0, x - 4)), 90); setTimeout(() => setVu((x) => Math.max(0, x - 4)), 180);
   };
-  const hitPad = React.useCallback((i, v) => {
-    Engine.hit(i, v); flash([i], v);
-    setLast({ text: DRUMS[i].name, sub: `vel ${Math.round(v * 127)}` });
-  }, []);
+  const hitPad = React.useCallback((i, v) => { Engine.hit(i, v); flash([i], v); setLast({ text: DRUMS[i].name.toUpperCase(), sub: `VEL ${Math.round(v * 127)}` }); }, []);
   const noteOn = React.useCallback((midi, v) => {
-    Engine.noteOn(midi, v, ref.current.preset);
-    setHeld((h) => ({ ...h, [midi]: true }));
-    setLast({ text: `${NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`, sub: PRESETS.find((p) => p[0] === ref.current.preset)[1] });
-    flash([], v);
+    Engine.noteOn(midi, v, ref.current.preset); setHeld((h) => ({ ...h, [midi]: true }));
+    setLast({ text: `${NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`, sub: PRESETS.find((p) => p[0] === ref.current.preset)[1] }); flash([], v);
   }, []);
   const noteOff = React.useCallback((midi) => { Engine.noteOff(midi); setHeld((h) => { const n = { ...h }; delete n[midi]; return n; }); }, []);
+  const togglePlay = React.useCallback(() => { if (ref.current.playing) { Engine.stop(); setPlaying(false); } else { Engine.play(); setPlaying(true); } }, []);
 
-  const togglePlay = React.useCallback(() => {
-    if (ref.current.playing) { Engine.stop(); setPlaying(false); } else { Engine.play(); setPlaying(true); }
-  }, []);
-
-  // Computer keyboard: works while Übersicht interaction mode is on.
   React.useEffect(() => {
     const down = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -751,87 +769,99 @@ function KeysPads() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
   }, [hitPad, noteOn, noteOff, togglePlay]);
 
-  // Piano pointer handling with glissando: one pointer, note follows the key under it.
+  // Knobs: drag vertically. Volume knob 0..1, tempo knob 50..200.
+  const knob = (get, set, min, max, per) => ({
+    onPointerDown: (e) => { e.currentTarget.setPointerCapture(e.pointerId); e.currentTarget.__y = e.clientY; e.currentTarget.__v = get(); },
+    onPointerMove: (e) => { if (e.currentTarget.__y == null) return; const dv = (e.currentTarget.__y - e.clientY) * per; set(Math.max(min, Math.min(max, e.currentTarget.__v + dv))); },
+    onPointerUp: (e) => { e.currentTarget.__y = null; }, onPointerCancel: (e) => { e.currentTarget.__y = null; },
+  });
+  const rot = (v, min, max) => -135 + 270 * ((v - min) / (max - min));
+
   const drag = React.useRef(null);
   const midiAt = (x, y) => { const el = document.elementFromPoint(x, y); const k = el && el.closest && el.closest("[data-midi]"); return k ? Number(k.getAttribute("data-midi")) : null; };
-  const onPianoDown = (e) => {
-    const m = midiAt(e.clientX, e.clientY); if (m == null) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const r = e.currentTarget.getBoundingClientRect(); const v = 0.5 + 0.5 * Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-    drag.current = { m, v }; noteOn(m, v);
-  };
-  const onPianoMove = (e) => {
-    if (!drag.current) return; const m = midiAt(e.clientX, e.clientY);
-    if (m != null && m !== drag.current.m) { noteOff(drag.current.m); drag.current.m = m; noteOn(m, drag.current.v); }
-  };
+  const onPianoDown = (e) => { const m = midiAt(e.clientX, e.clientY); if (m == null) return; e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); const v = 0.5 + 0.5 * Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)); drag.current = { m, v }; noteOn(m, v); };
+  const onPianoMove = (e) => { if (!drag.current) return; const m = midiAt(e.clientX, e.clientY); if (m != null && m !== drag.current.m) { noteOff(drag.current.m); drag.current.m = m; noteOn(m, drag.current.v); } };
   const onPianoUp = () => { if (drag.current) { noteOff(drag.current.m); drag.current = null; } };
 
   const toggleStep = (s) => setPattern((p) => { const n = p.slice(); n[sel] = n[sel] ^ (1 << s); return n; });
   const clearPattern = () => setPattern((p) => { const n = p.slice(); n[sel] = 0; return n; });
-  const base = (octave + 1) * 12;
-  const whites = [], blacks = [];
+  const base = (octave + 1) * 12; const whites = [], blacks = [];
   for (let o = 0; o < 2; o++) for (let s = 0; s < 12; s++) {
     const midi = base + o * 12 + s;
     if (BLACK[s] == null) whites.push({ midi, name: NAMES[s], oct: octave + o, key: Object.keys(NOTE_KEYS).find((k) => NOTE_KEYS[k] === o * 12 + s) });
     else blacks.push({ midi, left: ((o * 7 + BLACK[s]) / 14) * 100 });
   }
-  const selTint = FAM_TINT[DRUMS[sel].fam];
 
   return (
     <div>
       <DragHandle k={KEY} />
       <ResizeHandle k={KEY} />
-      <div className="top">
-        <span className="cap">Keys &amp; Pads · 808 kit · synthesized</span>
-        <div className="mode" title="Which instrument the computer keyboard plays (Tab)">
-          <span className={mode === "pads" ? "on" : ""} onClick={() => setMode("pads")}>Pads</span>
-          <span className={mode === "keys" ? "on" : ""} onClick={() => setMode("keys")}>Keys</span>
+      <div className="lcd">
+        <div className="brand">Keys &amp; Pads<b>808 · SYNTH</b></div>
+        <div className="icons">
+          <Icon id="play" on={playing} org />
+          <Icon id="pads" on={mode === "pads"} />
+          <Icon id="keys" on={mode === "keys"} />
+          <Icon id="grand" on={preset === "grand"} />
+          <Icon id="ep" on={preset === "ep"} />
+          <Icon id="bell" on={preset === "bell"} />
         </div>
+        <div className="main">
+          <div className="hit">{last.text}{last.sub ? <small>{last.sub}</small> : null}</div>
+          <div className="meta"><b>{bpm}</b> BPM<br />OCT <b>{octave}</b> · VOL <b>{Math.round(vol * 100)}</b></div>
+        </div>
+        <div className="vu">{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < vu ? (i > 7 ? "on hot" : "on") : ""} />)}</div>
       </div>
-      <div className="body">
+      <div className="panel">
+        <div className="col">
+          <span className="print">Volume</span>
+          <div className="knob" {...knob(() => vol, setVol, 0, 1, 0.006)}><div className="ind" style={{ transform: `rotate(${rot(vol, 0, 1)}deg)` }} /></div>
+          <span className="print" style={{ marginTop: 6 }}>Tempo</span>
+          <div className="knob orange" {...knob(() => bpm, setBpm, 50, 200, 0.6)}><div className="ind" style={{ transform: `rotate(${rot(bpm, 50, 200)}deg)` }} /></div>
+          <span className="print" style={{ marginTop: 8 }}>Typing</span>
+          <div className="with-led"><span className={`led ${mode === "pads" ? "on" : ""}`} /><div className="btn" onClick={() => setMode("pads")}>Pads</div></div>
+          <div className="with-led"><span className={`led ${mode === "keys" ? "on" : ""}`} /><div className="btn" onClick={() => setMode("keys")}>Keys</div></div>
+        </div>
         <div className="pads">
           {DRUMS.map((d, i) => (
-            <div key={d.id} className={`pad ${sel === i ? "sel" : ""} ${lit[i] ? "lit" : ""}`} style={{ "--tint": FAM_TINT[d.fam] }}
-                 onPointerDown={(e) => { const r = e.currentTarget.getBoundingClientRect(); hitPad(i, 0.45 + 0.55 * ((e.clientY - r.top) / r.height)); setSel(i); }}>
-              <span className="key">{PAD_KEYS[i].toUpperCase()}</span>
-              <span className="led" />
-              <span className="name">{d.name}</span>
-              {lit[i] ? <span key={lit[i]} className="ripple" /> : null}
+            <div key={d.id} className="pcell">
+              <span className="print"><span className={`led ${sel === i ? "on" : ""}`} />{d.name}</span>
+              <div className={`pad ${lit[i] ? "lit" : ""}`} onPointerDown={(e) => { const r = e.currentTarget.getBoundingClientRect(); hitPad(i, 0.45 + 0.55 * ((e.clientY - r.top) / r.height)); setSel(i); }}>
+                <span className="k">{PAD_KEYS[i].toUpperCase()}</span>
+                <span className="sym">{d.fam}</span>
+                {lit[i] ? <span key={lit[i]} className="glow" /> : null}
+              </div>
             </div>
           ))}
         </div>
-        <div className="side">
-          <div className="lcd">
-            <div className="row"><span>{mode === "pads" ? "Typing plays pads" : "Typing plays keys"}</span><span>{bpm} bpm · oct {octave}</span></div>
-            <div className="hit">{last.text}<small>{last.sub}</small></div>
-            <div className="vu">{Array.from({ length: 12 }, (_, i) => <i key={i} className={i < vu ? (i > 8 ? "on hot" : "on") : ""} />)}</div>
+        <div className="col">
+          <span className="print">Sequencer</span>
+          <div className={`btn wide ${playing ? "orange" : "dark"}`} onClick={togglePlay}>{playing ? "Stop" : "Play"}</div>
+          <div className="btn wide" onClick={clearPattern}>Clear</div>
+          <span className="print" style={{ marginTop: 6 }}>Octave</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            <div className="btn" style={{ width: 39 }} onClick={() => setOctave((o) => Math.max(1, o - 1))}>−</div>
+            <div className="btn" style={{ width: 39 }} onClick={() => setOctave((o) => Math.min(7, o + 1))}>+</div>
           </div>
-          <div className="steps" style={{ "--tint": selTint }} title={`Steps for ${DRUMS[sel].name}`}>
-            {Array.from({ length: 16 }, (_, s) => <div key={s} className={`step ${pattern[sel] & (1 << s) ? "on" : ""} ${step === s ? "now" : ""}`} onPointerDown={() => toggleStep(s)} />)}
-          </div>
-          <div className="ctl">
-            <div className={`btn play ${playing ? "on" : ""}`} onClick={togglePlay} title="Play / stop (space)">{playing ? "■" : "▶"}</div>
-            <div className="btn" onClick={() => setBpm((b) => Math.max(50, b - 2))}>−</div>
-            <div className="bpm"><b>{bpm}</b> bpm</div>
-            <div className="btn" onClick={() => setBpm((b) => Math.min(200, b + 2))}>+</div>
-            <div className="btn" onClick={clearPattern} title="Clear this pad's steps">clr</div>
-          </div>
-          <div className="ctl">
-            <div className="btn" onClick={() => setOctave((o) => Math.max(1, o - 1))} title="Octave down (,)">‹ oct</div>
-            <div className="btn" onClick={() => setOctave((o) => Math.min(7, o + 1))} title="Octave up (.)">oct ›</div>
-            <div className="chips">{PRESETS.map(([id, name]) => <span key={id} className={`chip ${preset === id ? "on" : ""}`} onClick={() => setPreset(id)}>{name}</span>)}</div>
-          </div>
+          <span className="print" style={{ marginTop: 6 }}>Voice</span>
+          {PRESETS.map(([id, name]) => <div key={id} className={`btn wide ${preset === id ? "dark" : ""}`} onClick={() => setPreset(id)}>{name}</div>)}
+        </div>
+        <div className="steps">
+          {Array.from({ length: 16 }, (_, s) => (
+            <div key={s} className={`step ${pattern[sel] & (1 << s) ? "on" : ""} ${step === s ? "now" : ""}`} style={{ "--q": QUAD[Math.floor(s / 4)] }} onPointerDown={() => toggleStep(s)}>
+              <span className="sled" /><span className="cap" /><span className="n">{s + 1}</span>
+            </div>
+          ))}
+        </div>
+        <div className="kb" onPointerDown={onPianoDown} onPointerMove={onPianoMove} onPointerUp={onPianoUp} onPointerCancel={onPianoUp}>
+          {whites.map((w) => <div key={w.midi} className={`white ${held[w.midi] ? "on" : ""}`} data-midi={w.midi}><span className="n"><b>{w.name}{w.oct}</b>{w.key ? w.key.toUpperCase() : ""}</span></div>)}
+          {blacks.map((b) => <div key={b.midi} className={`black ${held[b.midi] ? "on" : ""}`} data-midi={b.midi} style={{ left: `${b.left}%` }} />)}
+        </div>
+        <div className="footer">
+          <span className="print">1234 · QWER · ASDF · ZXCV pads &nbsp; A–K keys</span>
+          <span className="print">Space play · [ ] tempo · , . octave · Tab typing target</span>
         </div>
       </div>
-      <div className="piano" onPointerDown={onPianoDown} onPointerMove={onPianoMove} onPointerUp={onPianoUp} onPointerCancel={onPianoUp}>
-        {whites.map((w) => (
-          <div key={w.midi} className={`white ${held[w.midi] ? "on" : ""}`} data-midi={w.midi}>
-            <span className="n">{w.key ? w.key.toUpperCase() : ""}<b>{w.name}{w.oct}</b></span>
-          </div>
-        ))}
-        {blacks.map((b) => <div key={b.midi} className={`black ${held[b.midi] ? "on" : ""}`} data-midi={b.midi} style={{ left: `${b.left}%` }} />)}
-      </div>
-      <div className="foot">pads 1234 · qwer · asdf · zxcv&nbsp;&nbsp;·&nbsp;&nbsp;keys a w s e d f t g y h u j k&nbsp;&nbsp;·&nbsp;&nbsp;space play · [ ] tempo · , . octave · tab switches</div>
     </div>
   );
 }
