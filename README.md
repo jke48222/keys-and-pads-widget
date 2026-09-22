@@ -7,11 +7,7 @@
 [Übersicht gallery](https://tracesof.net/uebersicht-widgets/) · [Widget suite](https://github.com/jke48222/widget-suite) · [Download](https://github.com/jke48222/keys-and-pads-widget/releases/latest) · [Setup guide](docs/SETUP.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 A widget for [Übersicht](http://tracesof.net/uebersicht/), self-contained in
-`index.jsx`. It is built like a small hardware sampler: a light-grey slab with
-a charcoal display band and dot-matrix readout, sixteen black pads with white
-legends and printed labels, a volume knob and an orange tempo knob you drag,
-a row of step keys in the TR-808's four colours, and two octaves of mini keys.
-Every sound is synthesized with Web Audio the moment you play it:
+`index.jsx`. Every sound is synthesized with Web Audio the moment you play it:
 an 808-style kit (kick, snare, clap, closed and open hat, rim, three toms, conga,
 cowbell, shaker, crash, ride, a zap, and an 808 bass), a step sequencer that runs
 on the audio clock, and three keyboard voices: **Grand** (additive partials with
@@ -92,7 +88,6 @@ Everything runs through a gentle compressor and a synthesized convolution reverb
 ## Bundled files
 
 - `keys-and-pads.widget/index.jsx` — the widget, engine included
-- `keys-and-pads.widget/fonts/` — Doto (display) and Barlow Condensed (labels), SIL Open Font License, see `fonts/OFL.txt`
 - `install.sh` / `install.command` — one-click installer (copies the widget into Übersicht and installs any helpers)
 - `check.sh` — read-only setup diagnostics; prints pass/fail per item
 
